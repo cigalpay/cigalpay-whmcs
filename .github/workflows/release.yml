@@ -1,0 +1,40 @@
+# Pushing a tag vX.Y.Z builds cigalpay-whmcs.zip (the modules folder) and publishes it as a GitHub release.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches the module version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version=$(grep -oP "const VERSION = '\K[^']+" modules/gateways/cigalpay/lib/Api.php)
+          echo "tag=$tag version=$version"
+          [ "$tag" = "$version" ] || { echo "::error::Tag v$tag doesn't match VERSION $version in modules/gateways/cigalpay/lib/Api.php"; exit 1; }
+
+      - name: Check PHP syntax
+        run: find modules -name '*.php' -print0 | xargs -0 -n1 php -l
+
+      - name: Build the zip
+        run: |
+          mkdir -p build
+          zip -qr build/cigalpay-whmcs.zip modules
+          unzip -l build/cigalpay-whmcs.zip
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes=$(awk -v v="${GITHUB_REF_NAME#v}" '$0 == "## " v {on=1; next} /^## / {on=0} on && NF' CHANGELOG.md)
+          gh release create "$GITHUB_REF_NAME" build/cigalpay-whmcs.zip \
+            --title "${GITHUB_REF_NAME#v}" \
+            --notes "${notes:-Release ${GITHUB_REF_NAME#v}.}"
